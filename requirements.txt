@@ -1,0 +1,11 @@
+fastapi
+uvicorn[standard]
+python-multipart
+requests
+pydantic
+email-validator
+python-dotenv
+Pillow
+python-docx
+reportlab
+python-pptx

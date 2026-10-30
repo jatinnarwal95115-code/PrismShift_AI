@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Virtual environment
+.venv/
+venv/
+env/
+
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+
+# Local database
+*.db
+*.sqlite
+*.sqlite3
+
+# Uploaded images and generated reports
+Backend/data/uploads/*
+Backend/generated/reports/*
+
+# Keep directory structure
+!Backend/data/uploads/.gitkeep
+!Backend/generated/reports/.gitkeep
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
