@@ -9,3 +9,4 @@ Pillow
 python-docx
 reportlab
 python-pptx
+ollama>=0.4.7

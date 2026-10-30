@@ -51,4 +51,5 @@ IMPORTANT:
 - Do not create the image or website yourself.
 - Do not generate HTML, CSS, JavaScript or SVG.
 - Do not include explanations inside the generated prompt that are meant only for PrismShift.
-- Make the generated prompt practical and detailed.
+- Make the generated prompt practical and detailed.- Write everything in plain text. Do not use Markdown symbols such as ** or ##.
+- The very last section must be "GENERATED AI PROMPT:" and it must contain only the finished prompt, with nothing after it.

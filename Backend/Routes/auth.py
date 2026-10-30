@@ -22,6 +22,27 @@ router = APIRouter(
 security = HTTPBearer(auto_error=False)
 
 
+def get_optional_user(
+    credentials: HTTPAuthorizationCredentials = Depends(security)
+):
+    """Return the authenticated user, or None when no bearer token is sent.
+
+    Reality and Digital generation are usable without an account; when a
+    token is supplied it must still be valid.
+    """
+    if not credentials:
+        return None
+
+    user = get_user_from_token(credentials.credentials)
+    if not user:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid login session."
+        )
+
+    return user
+
+
 def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security)
 ):

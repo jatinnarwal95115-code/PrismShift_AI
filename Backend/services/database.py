@@ -1,4 +1,5 @@
 import sqlite3
+import json
 from pathlib import Path
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -82,6 +83,11 @@ def init_db():
         );
         """)
 
+        # Migrate existing databases without deleting saved conversations.
+        columns = {row["name"] for row in db.execute("PRAGMA table_info(conversations)")}
+        if "input_data" not in columns:
+            db.execute("ALTER TABLE conversations ADD COLUMN input_data TEXT")
+
         # Remove messages orphaned by the old, non-cascading deletes.
         db.execute(
             """
@@ -91,15 +97,16 @@ def init_db():
         )
 
 
-def create_conversation(user_id, title, mode, image_path=None):
+def create_conversation(user_id, title, mode, image_path=None, input_data=None):
     with get_db() as db:
         cursor = db.execute(
             """
             INSERT INTO conversations
-            (user_id, title, mode, image_path)
-            VALUES (?, ?, ?, ?)
+            (user_id, title, mode, image_path, input_data)
+            VALUES (?, ?, ?, ?, ?)
             """,
-            (user_id, title, mode, image_path)
+            (user_id, title, mode, image_path,
+             json.dumps(input_data or {}, ensure_ascii=False))
         )
 
         return cursor.lastrowid

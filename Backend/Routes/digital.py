@@ -80,7 +80,8 @@ def _save_prompt(user, description, generated_prompt, image_path):
         user_id=user["id"],
         title="Digital Design Prompt",
         mode="digital",
-        image_path=image_path
+        image_path=image_path,
+        input_data={"description": description}
     )
 
     if description.strip():

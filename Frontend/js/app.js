@@ -71,7 +71,9 @@
             sessionStorage.setItem("prismshift_open_conversation", JSON.stringify({
               id: conversation.id,
               mode: conversation.mode,
-              messages: conversation.messages || []
+              messages: conversation.messages || [],
+              input_data: conversation.input_data || {},
+              image_url: conversation.image_url || null
             }));
             location.href = conversation.mode === "reality" ? "reality.html" : "digital.html";
           } catch (error) {

@@ -1,9 +1,14 @@
+import json
+from pathlib import Path
+
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import FileResponse
 
 from Backend.Routes.auth import get_current_user
 from Backend.services.database import (
     get_db,
-    get_user_conversation
+    get_user_conversation,
+    UPLOAD_DIR
 )
 
 router = APIRouter(
@@ -62,11 +67,39 @@ def open_conversation(
     conversation["messages"] = [
         dict(row) for row in rows
     ]
+    try:
+        conversation["input_data"] = json.loads(conversation.get("input_data") or "{}")
+    except (TypeError, ValueError):
+        conversation["input_data"] = {}
+    conversation["image_url"] = (
+        f"/history/{conversation_id}/image" if conversation.get("image_path") else None
+    )
+    conversation.pop("image_path", None)
 
     return {
         "success": True,
         "conversation": conversation
     }
+
+
+@router.get("/{conversation_id}/image")
+def get_conversation_image(
+    conversation_id: int,
+    user=Depends(get_current_user)
+):
+    conversation = get_user_conversation(conversation_id, user["id"])
+    if not conversation or not conversation.get("image_path"):
+        raise HTTPException(status_code=404, detail="Image not found.")
+
+    image_path = Path(conversation["image_path"]).resolve()
+    if image_path.parent != UPLOAD_DIR.resolve() or not image_path.is_file():
+        raise HTTPException(status_code=404, detail="Saved image is no longer available.")
+
+    media_type = {
+        ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+        ".png": "image/png", ".webp": "image/webp"
+    }.get(image_path.suffix.lower(), "application/octet-stream")
+    return FileResponse(str(image_path), media_type=media_type)
 
 
 @router.delete("/{conversation_id}")

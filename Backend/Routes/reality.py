@@ -56,7 +56,8 @@ def _model_error(error: Exception) -> HTTPException:
 # 1. GENERATE FORMAL DOCUMENT
 # --------------------------------------------------
 
-def _save_report(user, document_type, location, report, image_path):
+def _save_report(user, document_type, location, report, image_path,
+                 author_name="", authority="", additional_points=""):
     """Store the finished document in the user's history. Returns the id."""
 
     if not user:
@@ -67,7 +68,14 @@ def _save_report(user, document_type, location, report, image_path):
         user_id=user["id"],
         title=f"{document_type.title()} - {location.strip() or 'New Report'}",
         mode="reality",
-        image_path=image_path
+        image_path=image_path,
+        input_data={
+            "document_type": document_type,
+            "author_name": author_name,
+            "location": location,
+            "authority": authority,
+            "additional_points": additional_points
+        }
     )
     save_message(conversation_id, "assistant", report)
 
@@ -108,7 +116,8 @@ async def reality_generate(
 
                 report = finish_reality_report(raw, today, author_name)
                 conversation_id = _save_report(
-                    user, document_type, location, report, image_path
+                    user, document_type, location, report, image_path,
+                    author_name, authority, additional_points
                 )
 
                 yield event_line({
@@ -139,7 +148,10 @@ async def reality_generate(
         delete_image_file(image_path)
         raise _model_error(error)
 
-    conversation_id = _save_report(user, document_type, location, report, image_path)
+    conversation_id = _save_report(
+        user, document_type, location, report, image_path,
+        author_name, authority, additional_points
+    )
 
     return {
         "success": True,
