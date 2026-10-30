@@ -16,12 +16,6 @@
         "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
       })[char]);
     },
-    // "2026-10-30T08:20:00Z" -> "30 Oct, 1:50 pm" in the viewer's own time zone.
-    when(value) {
-      const date = new Date(value);
-      if (!value || Number.isNaN(date.getTime())) return "";
-      return date.toLocaleString([], { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" });
-    },
     user: () => {
       try { return JSON.parse(localStorage.getItem("prismshift_user") || "{}"); }
       catch { return {}; }
@@ -66,7 +60,7 @@
           <span>${item.mode === "reality" ? "◈" : "✧"}</span>
           <span style="min-width:0">
             <span class="session-name">${window.PS.esc(item.title || "Untitled conversation")}</span>
-            <span class="session-meta">${item.mode === "reality" ? "Reality" : "Digital"} · ${window.PS.esc(window.PS.when(item.updated_at))}</span>
+            <span class="session-meta">${item.mode === "reality" ? "Reality" : "Digital"} · ${window.PS.esc(item.updated_at || "")}</span>
           </span>
         </button>`).join("") || '<div class="sidebar-empty">Your saved conversations will appear here.</div>';
       container.querySelectorAll("[data-history-id]").forEach(button => {
@@ -89,7 +83,6 @@
       container.innerHTML = '<div class="sidebar-empty">History is unavailable.</div>';
     }
   }
-  window.PS.refreshHistory = loadSidebarHistory;
   loadSidebarHistory();
 
   if (!publicPage) {

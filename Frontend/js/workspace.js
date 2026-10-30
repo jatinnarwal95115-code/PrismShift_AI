@@ -139,43 +139,57 @@
     output.classList.remove("hidden");
   }
 
-  // On narrower screens the results panel sits below the form; bring it into view.
-  function revealResults() {
-    $(".results-panel")?.scrollIntoView({ behavior: "smooth", block: "nearest" });
-  }
-
   async function generate() {
     if (!selectedFile) return toast("Upload your own image first.");
     const endpoint = mode === "reality" ? "/reality/generate" : "/digital/generate";
     const buttonLabel = $(".generate-label");
+    const loadingMessage = $(".loading-message");
+    const progressMessages = mode === "reality"
+      ? ["Sending your image to the local AI engine…", "Analyzing visible details and context…", "Preparing your structured report…"]
+      : ["Sending your image to the local AI engine…", "Analyzing layout, style and visual elements…", "Writing your detailed design prompt…"];
+    let progressIndex = 0;
+    let progressTimer = null;
+
     generateButton.disabled = true;
-    buttonLabel.textContent = "Working…";
+    generateButton.setAttribute("aria-busy", "true");
+    if (buttonLabel) buttonLabel.textContent = "Generating…";
     empty.classList.add("hidden");
     output.classList.add("hidden");
     errorBox.classList.add("hidden");
     loading.classList.remove("hidden");
-    revealResults();
-    $(".loading-message").textContent = mode === "reality"
-      ? "Gemma is analyzing your image and preparing your document…"
-      : "Gemma is studying the visual design and writing your prompt…";
+    loading.setAttribute("role", "status");
+    loading.setAttribute("aria-live", "polite");
+    if (loadingMessage) loadingMessage.textContent = progressMessages[0];
+    progressTimer = window.setInterval(() => {
+      progressIndex = (progressIndex + 1) % progressMessages.length;
+      if (loadingMessage) loadingMessage.textContent = progressMessages[progressIndex];
+    }, 4500);
     retryAction = generate;
 
     try {
+      // The request is deliberately awaited here; keep the loading panel visible
+      // until the backend has returned the generated text.
       const response = await api.form(endpoint, buildFormData());
-      const content = mode === "reality" ? response.document : response.generated_prompt;
+      const content = mode === "reality"
+        ? (response?.document ?? response?.data?.document)
+        : (response?.generated_prompt ?? response?.data?.generated_prompt);
       if (typeof content !== "string" || !content.trim()) {
-        throw new Error("The backend response did not include the expected generated content.");
+        throw new Error("The backend responded, but no generated text was found in its response.");
       }
-      conversationId = response.conversation_id ?? null;
-      showResult(content, conversationId, response.analysis || "");
-      window.PS.refreshHistory?.();
+      conversationId = response.conversation_id ?? response?.data?.conversation_id ?? null;
+      showResult(content, conversationId, response.analysis || response?.data?.analysis || "");
+      // Bring the completed result into view, especially on smaller screens.
+      output.scrollIntoView({ behavior: "smooth", block: "start" });
       toast(mode === "reality" ? "Report generated." : "Design prompt generated.");
     } catch (requestError) {
       showError(requestError.message || "The request could not be completed.");
-      toast("Could not complete the request.");
+      errorBox.scrollIntoView({ behavior: "smooth", block: "center" });
+      toast(requestError.message || "Could not complete the request.");
     } finally {
+      if (progressTimer !== null) window.clearInterval(progressTimer);
       generateButton.disabled = !selectedFile;
-      buttonLabel.textContent = mode === "reality" ? "Generate report" : "Generate prompt";
+      generateButton.removeAttribute("aria-busy");
+      if (buttonLabel) buttonLabel.textContent = mode === "reality" ? "Generate report" : "Generate prompt";
     }
   }
 
@@ -210,8 +224,18 @@
   }
   analyzeButton?.addEventListener("click", analyzeImage);
 
-  generateButton.addEventListener("click", generate);
-  $(".retry-btn")?.addEventListener("click", () => retryAction?.());
+  // Explicitly prevent native form submission: these controls may be placed
+  // inside a form by a host layout, and a submit would reload the whole page.
+  generateButton.setAttribute("type", "button");
+  generateButton.addEventListener("click", event => {
+    event.preventDefault();
+    event.stopPropagation();
+    void generate();
+  });
+  $(".retry-btn")?.addEventListener("click", event => {
+    event.preventDefault();
+    void retryAction?.();
+  });
 
   $(".copy-output")?.addEventListener("click", async () => {
     if (!currentContent) return;
@@ -272,7 +296,6 @@
       }
       conversationId = response.conversation_id ?? conversationId;
       showResult(revised, conversationId);
-      window.PS.refreshHistory?.();
       $(".edit-message").value = "";
       toast("Your content has been refined.");
     } catch (requestError) {

@@ -1,3 +1,4 @@
+import threading
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -6,6 +7,7 @@ from fastapi.staticfiles import StaticFiles
 
 from Backend.config import BASE_DIR, CORS_ORIGIN_REGEX
 from Backend.services.database import init_db
+from Backend.services.gemma_service import warm_up_model
 from Backend.services.auth_service import delete_expired_sessions
 from Backend.Routes import auth, reality, digital, history
 
@@ -14,6 +16,7 @@ from Backend.Routes import auth, reality, digital, history
 async def lifespan(app: FastAPI):
     init_db()
     delete_expired_sessions()
+    threading.Thread(target=warm_up_model, daemon=True).start()
     yield
 
 

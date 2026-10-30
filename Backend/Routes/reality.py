@@ -16,9 +16,17 @@ from Backend.Routes.auth import get_optional_user
 from Backend.services.image_service import save_uploaded_image
 from Backend.services.gemma_service import (
     ModelUnavailableError,
+    edit_content,
+    edit_prompt_text,
+    finish_reality_report,
     generate_reality_report,
     normalise_document_type,
-    edit_content
+    reality_prompt_text
+)
+from Backend.services.stream_service import (
+    event_line,
+    stream_response,
+    stream_snapshots
 )
 from Backend.services.report_service import generate_report
 from Backend.services.database import (
@@ -48,6 +56,24 @@ def _model_error(error: Exception) -> HTTPException:
 # 1. GENERATE FORMAL DOCUMENT
 # --------------------------------------------------
 
+def _save_report(user, document_type, location, report, image_path):
+    """Store the finished document in the user's history. Returns the id."""
+
+    if not user:
+        delete_image_file(image_path)
+        return None
+
+    conversation_id = create_conversation(
+        user_id=user["id"],
+        title=f"{document_type.title()} - {location.strip() or 'New Report'}",
+        mode="reality",
+        image_path=image_path
+    )
+    save_message(conversation_id, "assistant", report)
+
+    return conversation_id
+
+
 @router.post("/generate")
 async def reality_generate(
     image: UploadFile = File(...),
@@ -56,15 +82,46 @@ async def reality_generate(
     location: str = Form(""),
     authority: str = Form(""),
     additional_points: str = Form(""),
+    stream: bool = Form(False),
     user=Depends(get_optional_user)
 ):
     # Validate before saving the upload or calling the (slow) model.
     try:
         document_type = normalise_document_type(document_type)
+        prompt, today = reality_prompt_text(
+            document_type, author_name, location, authority, additional_points
+        )
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error))
 
     image_path = await save_uploaded_image(image)
+
+    if stream:
+        # The page shows the document while it is being written, so the user
+        # sees text within seconds instead of waiting for the whole answer.
+        def events():
+            try:
+                raw = ""
+
+                for raw, snapshot in stream_snapshots(prompt, image_path, 1200):
+                    yield event_line({"text": snapshot})
+
+                report = finish_reality_report(raw, today, author_name)
+                conversation_id = _save_report(
+                    user, document_type, location, report, image_path
+                )
+
+                yield event_line({
+                    "done": True,
+                    "document": report,
+                    "conversation_id": conversation_id
+                })
+
+            except Exception as error:
+                delete_image_file(image_path)
+                yield event_line({"error": str(_model_error(error).detail)})
+
+        return stream_response(events())
 
     try:
         # The model call is slow and blocking. Run it in a worker thread so
@@ -78,28 +135,11 @@ async def reality_generate(
             authority=authority,
             additional_points=additional_points
         )
-
-    except ValueError as error:
-        delete_image_file(image_path)
-        raise HTTPException(status_code=400, detail=str(error))
-
     except Exception as error:
         delete_image_file(image_path)
         raise _model_error(error)
 
-    conversation_id = None
-
-    if user:
-        title_place = location.strip() or "New Report"
-        conversation_id = create_conversation(
-            user_id=user["id"],
-            title=f"{document_type.title()} - {title_place}",
-            mode="reality",
-            image_path=image_path
-        )
-        save_message(conversation_id, "assistant", report)
-    else:
-        delete_image_file(image_path)
+    conversation_id = _save_report(user, document_type, location, report, image_path)
 
     return {
         "success": True,
@@ -118,6 +158,7 @@ async def reality_edit(
     instruction: str = Form(...),
     content: str = Form(...),
     conversation_id: int | None = Form(None),
+    stream: bool = Form(False),
     user=Depends(get_optional_user)
 ):
     if not instruction.strip() or not content.strip():
@@ -141,6 +182,32 @@ async def reality_edit(
                 detail="Reality conversation not found."
             )
 
+    def remember(revised):
+        if conversation_id is not None:
+            save_message(conversation_id, "user", instruction)
+            save_message(conversation_id, "assistant", revised)
+
+    if stream:
+        prompt = edit_prompt_text(content, instruction, "report")
+
+        def events():
+            try:
+                snapshot = ""
+
+                for _, snapshot in stream_snapshots(prompt, None, 1500):
+                    yield event_line({"text": snapshot})
+
+                remember(snapshot)
+                yield event_line({
+                    "done": True,
+                    "revised_document": snapshot,
+                    "conversation_id": conversation_id
+                })
+            except Exception as error:
+                yield event_line({"error": str(_model_error(error).detail)})
+
+        return stream_response(events())
+
     try:
         revised = await run_in_threadpool(
             edit_content,
@@ -151,9 +218,7 @@ async def reality_edit(
     except Exception as error:
         raise _model_error(error)
 
-    if conversation_id is not None:
-        save_message(conversation_id, "user", instruction)
-        save_message(conversation_id, "assistant", revised)
+    remember(revised)
 
     return {
         "success": True,

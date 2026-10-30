@@ -9,4 +9,17 @@
 .standalone-analysis p{margin:0;white-space:pre-wrap;font-size:12px;line-height:1.65;color:#55516a}
 .analyze-image-btn{margin:0 8px 8px 0}
 
-@media(min-width:901px){.results-panel{position:sticky;top:18px}}
+
+
+/* Keep the upload form and the result side by side on laptop-sized windows */
+@media(min-width:721px){
+  .workspace-grid{grid-template-columns:minmax(260px,.92fr) minmax(0,1.08fr)}
+  .results-panel{position:sticky;top:18px;max-height:calc(100vh - 36px);overflow:auto;min-height:0}
+  .results-empty,.loading-state,.error-state{min-height:230px}
+}
+@media(max-width:1100px){
+  .app-container{width:100%;min-height:100vh;margin:0;border-radius:0;position:relative}
+  .sidebar{position:fixed;z-index:50;top:0;bottom:0;left:0;width:275px;min-height:100vh;transform:translateX(-105%);transition:transform .25s;box-shadow:15px 0 40px #312e8140;background:#eee8ffef;backdrop-filter:blur(25px)}
+  .sidebar.open{transform:translateX(0)}
+  .mobile-menu{display:block}
+}

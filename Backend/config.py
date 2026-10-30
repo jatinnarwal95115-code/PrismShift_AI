@@ -30,6 +30,9 @@ OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://127.0.0.1:11434")
 # Local models can be slow on the first request while the model loads.
 OLLAMA_TIMEOUT = float(os.getenv("OLLAMA_TIMEOUT", "300"))
 
+# Keep the model loaded in memory between requests (avoids a slow reload).
+KEEP_ALIVE = os.getenv("OLLAMA_KEEP_ALIVE", "30m")
+
 SESSION_DAYS = int(os.getenv("SESSION_DAYS", "30"))
 
 # Any localhost / 127.0.0.1 origin (Live Server, Vite, FastAPI itself ...).

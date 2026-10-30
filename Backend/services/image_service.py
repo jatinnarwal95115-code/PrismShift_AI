@@ -11,8 +11,8 @@ ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
 MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB
 
 # Phone photos are often 4000+ px. The model downsizes them anyway, so shrinking
-# first makes generation much faster without hurting the result.
-MAX_DIMENSION = 1600
+# first makes generation faster without hurting the result.
+MAX_DIMENSION = 1280
 
 
 def _prepare_image(content: bytes, extension: str) -> bytes:

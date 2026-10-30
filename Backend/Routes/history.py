@@ -3,10 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from Backend.Routes.auth import get_current_user
 from Backend.services.database import (
     get_db,
-    get_user_conversation,
-    delete_user_conversation,
-    delete_image_file,
-    to_iso_utc
+    get_user_conversation
 )
 
 router = APIRouter(
@@ -17,26 +14,24 @@ router = APIRouter(
 
 @router.get("/")
 def get_history(user=Depends(get_current_user)):
+
     with get_db() as db:
-        rows = db.execute(
-            """
-            SELECT id, title, mode, created_at, updated_at
+        rows = db.execute("""
+            SELECT
+                id,
+                title,
+                mode,
+                created_at,
+                updated_at
             FROM conversations
             WHERE user_id = ?
-            ORDER BY updated_at DESC, id DESC
-            """,
-            (user["id"],)
-        ).fetchall()
+            ORDER BY updated_at DESC
+        """, (user["id"],)).fetchall()
 
-    history = []
-
-    for row in rows:
-        item = dict(row)
-        item["created_at"] = to_iso_utc(item["created_at"])
-        item["updated_at"] = to_iso_utc(item["updated_at"])
-        history.append(item)
-
-    return {"success": True, "history": history}
+    return {
+        "success": True,
+        "history": [dict(row) for row in rows]
+    }
 
 
 @router.get("/{conversation_id}")
@@ -44,17 +39,34 @@ def open_conversation(
     conversation_id: int,
     user=Depends(get_current_user)
 ):
-    # get_user_conversation already returns the messages in order.
-    conversation = get_user_conversation(conversation_id, user["id"])
+
+    conversation = get_user_conversation(
+        conversation_id,
+        user["id"]
+    )
 
     if not conversation:
-        raise HTTPException(status_code=404, detail="Conversation not found.")
+        raise HTTPException(
+            status_code=404,
+            detail="Conversation not found."
+        )
 
-    conversation.pop("image_path", None)  # server file path: not for clients
-    conversation["created_at"] = to_iso_utc(conversation["created_at"])
-    conversation["updated_at"] = to_iso_utc(conversation["updated_at"])
+    with get_db() as db:
+        rows = db.execute("""
+            SELECT id, role, content, created_at
+            FROM messages
+            WHERE conversation_id = ?
+            ORDER BY id ASC
+        """, (conversation_id,)).fetchall()
 
-    return {"success": True, "conversation": conversation}
+    conversation["messages"] = [
+        dict(row) for row in rows
+    ]
+
+    return {
+        "success": True,
+        "conversation": conversation
+    }
 
 
 @router.delete("/{conversation_id}")
@@ -62,12 +74,28 @@ def delete_conversation(
     conversation_id: int,
     user=Depends(get_current_user)
 ):
-    conversation = get_user_conversation(conversation_id, user["id"])
+
+    conversation = get_user_conversation(
+        conversation_id,
+        user["id"]
+    )
 
     if not conversation:
-        raise HTTPException(status_code=404, detail="Conversation not found.")
+        raise HTTPException(
+            status_code=404,
+            detail="Conversation not found."
+        )
 
-    delete_user_conversation(conversation_id, user["id"])
-    delete_image_file(conversation.get("image_path"))
+    with get_db() as db:
+        db.execute("""
+            DELETE FROM conversations
+            WHERE id = ? AND user_id = ?
+        """, (
+            conversation_id,
+            user["id"]
+        ))
 
-    return {"success": True, "message": "Conversation deleted."}
+    return {
+        "success": True,
+        "message": "Conversation deleted."
+    }

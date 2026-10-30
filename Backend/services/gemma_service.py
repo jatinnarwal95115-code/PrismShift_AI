@@ -4,7 +4,7 @@ from pathlib import Path
 
 import ollama
 
-from Backend.config import OLLAMA_HOST, OLLAMA_MODEL, OLLAMA_TIMEOUT
+from Backend.config import KEEP_ALIVE, OLLAMA_HOST, OLLAMA_MODEL, OLLAMA_TIMEOUT
 from Backend.services.prompt_service import build_prompt
 
 MODEL = OLLAMA_MODEL
@@ -18,13 +18,7 @@ class ModelUnavailableError(RuntimeError):
 # LOW-LEVEL MODEL CALL
 # --------------------------------------------------
 
-def ask_gemma(
-    prompt: str,
-    image_path: str | None = None,
-    temperature: float = 0.3
-) -> str:
-    """Send a text prompt, optionally with an image, to Gemma."""
-
+def _build_message(prompt: str, image_path: str | None) -> dict:
     message = {"role": "user", "content": prompt}
 
     if image_path:
@@ -35,22 +29,46 @@ def ask_gemma(
 
         message["images"] = [str(path)]
 
-    try:
-        client = ollama.Client(host=OLLAMA_HOST, timeout=OLLAMA_TIMEOUT)
+    return message
 
-        response = client.chat(
+
+def _client():
+    return ollama.Client(host=OLLAMA_HOST, timeout=OLLAMA_TIMEOUT)
+
+
+def _unavailable(error: Exception) -> ModelUnavailableError:
+    return ModelUnavailableError(
+        f"Could not get a response from Gemma. Make sure Ollama is "
+        f"running and {MODEL} is installed. Details: {error}"
+    )
+
+
+def _options(temperature: float, max_tokens: int) -> dict:
+    return {"temperature": temperature, "num_predict": max_tokens}
+
+
+def ask_gemma(
+    prompt: str,
+    image_path: str | None = None,
+    temperature: float = 0.3,
+    max_tokens: int = 1500
+) -> str:
+    """Send a prompt (optionally with an image) to Gemma and wait for all of it."""
+
+    message = _build_message(prompt, image_path)
+
+    try:
+        response = _client().chat(
             model=MODEL,
             messages=[message],
-            options={"temperature": temperature}
+            options=_options(temperature, max_tokens),
+            keep_alive=KEEP_ALIVE
         )
 
         text = (response["message"]["content"] or "").strip()
 
     except Exception as error:
-        raise ModelUnavailableError(
-            f"Could not get a response from Gemma. Make sure Ollama is "
-            f"running and {MODEL} is installed. Details: {error}"
-        ) from error
+        raise _unavailable(error) from error
 
     if not text:
         raise ModelUnavailableError(
@@ -58,6 +76,49 @@ def ask_gemma(
         )
 
     return text
+
+
+def stream_gemma(
+    prompt: str,
+    image_path: str | None = None,
+    temperature: float = 0.3,
+    max_tokens: int = 1500
+):
+    """Yield Gemma's answer piece by piece as it is being written."""
+
+    message = _build_message(prompt, image_path)
+    produced = False
+
+    try:
+        for part in _client().chat(
+            model=MODEL,
+            messages=[message],
+            options=_options(temperature, max_tokens),
+            keep_alive=KEEP_ALIVE,
+            stream=True
+        ):
+            chunk = part["message"]["content"] or ""
+
+            if chunk:
+                produced = True
+                yield chunk
+
+    except Exception as error:
+        raise _unavailable(error) from error
+
+    if not produced:
+        raise ModelUnavailableError(
+            "Gemma returned an empty response. Please try again."
+        )
+
+
+def warm_up_model() -> None:
+    """Load the model into memory so the first real request is not slow."""
+
+    try:
+        _client().generate(model=MODEL, prompt="", keep_alive=KEEP_ALIVE)
+    except Exception:
+        pass  # Ollama may not be running yet; real requests report that.
 
 
 # --------------------------------------------------
@@ -229,24 +290,22 @@ Important:
 _PROMPT_MARKER = re.compile(r"GENERATED\s+AI\s+PROMPT\s*:?", re.IGNORECASE)
 
 
-def generate_digital_prompt(
-    image_path: str,
-    description: str = ""
-) -> tuple[str, str]:
-    """Return (analysis, generated_prompt) for a design reference.
-
-    The template asks the model for an analysis followed by a section called
-    GENERATED AI PROMPT. The two parts are split so the UI can show the prompt
-    (the thing the user copies) separately from the analysis.
-    """
-
-    prompt = build_prompt(
+def digital_prompt_text(description: str = "") -> str:
+    return build_prompt(
         "digital",
         description=description.strip() or "No additional changes provided."
     )
 
-    text = clean_document(ask_gemma(prompt, image_path))
 
+def split_digital_output(raw_text: str) -> tuple[str, str]:
+    """Split the model output into (analysis, generated_prompt).
+
+    The template asks for an analysis followed by a section called
+    GENERATED AI PROMPT; the UI shows the prompt (the part the user copies)
+    separately from the analysis.
+    """
+
+    text = clean_document(raw_text)
     parts = _PROMPT_MARKER.split(text)
 
     if len(parts) < 2 or not parts[-1].strip():
@@ -254,6 +313,17 @@ def generate_digital_prompt(
         return "", text
 
     return parts[0].strip(), parts[-1].strip()
+
+
+def generate_digital_prompt(
+    image_path: str,
+    description: str = ""
+) -> tuple[str, str]:
+    """Return (analysis, generated_prompt) for a design reference."""
+
+    raw = ask_gemma(digital_prompt_text(description), image_path, max_tokens=1800)
+
+    return split_digital_output(raw)
 
 
 # --------------------------------------------------
@@ -378,18 +448,16 @@ def normalise_document_type(document_type: str) -> str:
     return value
 
 
-def generate_reality_report(
-    image_path: str,
+def reality_prompt_text(
     document_type: str,
     author_name: str,
     location: str,
     authority: str,
     additional_points: str = ""
-) -> str:
-    """Generate a formal Reality Mode document from a photograph."""
+) -> tuple[str, str]:
+    """Build the model prompt. Returns (prompt, today)."""
 
     document_type = normalise_document_type(document_type)
-
     today = datetime.now().strftime("%d %B %Y").lstrip("0")
 
     # Missing details become short placeholders the user can fill in.
@@ -408,9 +476,14 @@ def generate_reality_report(
         **values
     )
 
-    document = clean_document(ask_gemma(prompt, image_path))
+    return prompt, today
 
-    # Fill details the model left as placeholders although we know them.
+
+def finish_reality_report(raw_text: str, today: str, author_name: str = "") -> str:
+    """Clean the model output and fill in details we already know."""
+
+    document = clean_document(raw_text)
+
     document = re.sub(
         r"\[(?:today'?s |current )?date\]", today, document, flags=re.IGNORECASE
     )
@@ -426,9 +499,46 @@ def generate_reality_report(
     return document
 
 
+def generate_reality_report(
+    image_path: str,
+    document_type: str,
+    author_name: str,
+    location: str,
+    authority: str,
+    additional_points: str = ""
+) -> str:
+    """Generate a formal Reality Mode document from a photograph."""
+
+    prompt, today = reality_prompt_text(
+        document_type, author_name, location, authority, additional_points
+    )
+
+    raw = ask_gemma(prompt, image_path, max_tokens=1200)
+
+    return finish_reality_report(raw, today, author_name)
+
+
 # --------------------------------------------------
 # EDITING
 # --------------------------------------------------
+
+def edit_prompt_text(original_content: str, instruction: str, content_type: str) -> str:
+    if content_type == "report":
+        return build_prompt(
+            "reality_edit",
+            current_report=original_content,
+            instruction=instruction
+        )
+
+    if content_type == "prompt":
+        return build_prompt(
+            "digital_edit",
+            original_prompt=original_content,
+            instruction=instruction
+        )
+
+    raise ValueError("content_type must be 'report' or 'prompt'.")
+
 
 def edit_content(
     original_content: str,
@@ -437,19 +547,6 @@ def edit_content(
 ) -> str:
     """Revise an existing report or reusable design prompt."""
 
-    if content_type == "report":
-        prompt = build_prompt(
-            "reality_edit",
-            current_report=original_content,
-            instruction=instruction
-        )
-    elif content_type == "prompt":
-        prompt = build_prompt(
-            "digital_edit",
-            original_prompt=original_content,
-            instruction=instruction
-        )
-    else:
-        raise ValueError("content_type must be 'report' or 'prompt'.")
+    prompt = edit_prompt_text(original_content, instruction, content_type)
 
-    return clean_document(ask_gemma(prompt))
+    return clean_document(ask_gemma(prompt, max_tokens=1500))

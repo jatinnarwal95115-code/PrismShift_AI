@@ -1,5 +1,3 @@
-import sqlite3
-
 from fastapi import APIRouter, HTTPException, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
@@ -44,47 +42,23 @@ def get_current_user(
     return user
 
 
-def get_optional_user(
-    credentials: HTTPAuthorizationCredentials = Depends(security)
-):
-    """No token -> None (anonymous). A token that is invalid or expired -> 401,
-    so the frontend knows to send the user back to the login page instead of
-    silently not saving their work."""
-
-    if not credentials:
-        return None
-
-    user = get_user_from_token(credentials.credentials)
-
-    if not user:
-        raise HTTPException(
-            status_code=401,
-            detail="Your session has expired. Please log in again."
-        )
-
-    return user
-
-
 @router.post("/register")
 def register(data: RegisterRequest):
 
-    name = data.name.strip()
-    email = data.email.lower().strip()
-
-    if len(name) < 2:
-        raise HTTPException(
-            status_code=422,
-            detail="Please enter your name (at least 2 characters)."
-        )
-
     try:
-        user_id = create_user(name, email, data.password)
-
-    except sqlite3.IntegrityError:
-        raise HTTPException(
-            status_code=409,
-            detail="This email is already registered."
+        user_id = create_user(
+            data.name,
+            data.email,
+            data.password
         )
+
+    except Exception as error:
+        if "UNIQUE constraint failed" in str(error):
+            raise HTTPException(
+                status_code=409,
+                detail="This email is already registered."
+            )
+        raise
 
     token = create_session(user_id)
 
@@ -93,8 +67,8 @@ def register(data: RegisterRequest):
         "token": token,
         "user": {
             "id": user_id,
-            "name": name,
-            "email": email
+            "name": data.name,
+            "email": data.email
         }
     }
 
